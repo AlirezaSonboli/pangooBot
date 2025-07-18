@@ -108,11 +108,11 @@ bot.onText(/⭐ میخوام پنگوئن رو بشناسم/, async (msg) => {
                         { text: '📅 برنامه‌ریزی', callback_data: 'plannerFile' },
                     ],
                     [
-                        { text: '🏠 صفحه اصلی', callback_data: 'homeFile' },
-                        { text: '📊 نظرسنجی', callback_data: 'poleFile' },
+                        { text: '📚 زمان مطالعه', callback_data: 'studyFile' },
+                        { text: '📊 قطب(عادت‌های گروهی)', callback_data: 'poleFile' },
                     ],
                     [
-                        { text: '📚 زمان مطالعه', callback_data: 'studyFile' },
+                        { text: '🏠 خونه', callback_data: 'homeFile' },
                     ]
                 ]
             }
