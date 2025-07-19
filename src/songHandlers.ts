@@ -1,22 +1,38 @@
 import TelegramBot from "node-telegram-bot-api";
 
-// --- Helper: Get Liara AI Info ---
-async function getSongInfoFromLiara(songTitle: string, artistName: string): Promise<string> {
+// --- Helper: Get Liara AI Details ---
+// --- CHANGED ---: Renamed function and updated it to return a structured object.
+async function getSongDetailsFromLiara(songTitle: string, artistName: string): Promise<{ funFact: string; releaseDate: string; }> {
     const liaraApiKey = process.env.LIARA_AI_KEY;
     if (!liaraApiKey) {
-        return "کلید API برای Liara AI تنظیم نشده است.";
+        // Return a default object in case of configuration error
+        return {
+            funFact: "کلید API برای Liara AI تنظیم نشده است.",
+            releaseDate: "نامشخص"
+        };
     }
 
-    const liaraApiUrl ="https://ai.liara.ir/api/v1/682b8bde153623bd82f7d348/chat/completions"
-    const prompt = `یک حقیقت جالب (fun fact) در مورد آهنگ "${songTitle}" از "${artistName}" بگو.`;
+    const liaraApiUrl = "https://ai.liara.ir/api/v1/682b8bde153623bd82f7d348/chat/completions";
+
+    // --- CHANGED ---: A more powerful and specific prompt asking for a JSON object.
+    // This makes the output structured and predictable.
+    const prompt = `
+        در مورد آهنگ "${songTitle}" از "${artistName}"، اطلاعات زیر را در قالب یک آبجکت JSON ارائه بده:
+        1. یک فیلد به نام "funFact" که حاوی یک حقیقت جالب و دقیق (مثلا تاریخی، مربوط به تولید، یا داستانی) در مورد آهنگ باشد.
+        2. یک فیلد به نام "releaseDate" که حاوی تاریخ انتشار دقیق آهنگ (روز، ماه، سال) باشد.
+
+        فقط و فقط آبجکت JSON را برگردان و هیچ متن اضافی ارسال نکن.
+    `;
 
     const payload = {
-        model: 'openai/gpt-4o-mini', // Or another model supported by Liara
+        model: 'openai/gpt-4o-mini',
         messages: [{
             role: "user",
             content: prompt,
-        }, ],
+        },],
         stream: false,
+        // --- NEW ---: Instruct the model to output JSON
+        response_format: { type: "json_object" },
     };
 
     try {
@@ -36,12 +52,36 @@ async function getSongInfoFromLiara(songTitle: string, artistName: string): Prom
         }
 
         const result = await response.json();
-        const funFact = result.choices?.[0]?.message?.content?.trim();
-        return funFact || "نتوانستم حقیقت جالبی پیدا کنم.";
+        const content = result.choices?.[0]?.message?.content;
+
+        // --- CHANGED ---: Parse the JSON response from the AI
+        if (content) {
+            try {
+                const parsedContent = JSON.parse(content);
+                return {
+                    funFact: parsedContent.funFact || "نتوانستم حقیقت جالبی پیدا کنم.",
+                    releaseDate: parsedContent.releaseDate || "نامشخص"
+                };
+            } catch (e) {
+                console.error("Error parsing JSON from Liara AI:", e);
+                return {
+                    funFact: content, // Return the raw text if JSON parsing fails
+                    releaseDate: "نامشخص"
+                };
+            }
+        }
+
+        return {
+            funFact: "نتوانستم حقیقت جالبی پیدا کنم.",
+            releaseDate: "نامشخص"
+        };
 
     } catch (error) {
         console.error('Error fetching from Liara AI:', error);
-        return 'خطایی در هنگام دریافت اطلاعات از هوش مصنوعی رخ داد.';
+        return {
+            funFact: 'خطایی در هنگام دریافت اطلاعات از هوش مصنوعی رخ داد.',
+            releaseDate: 'نامشخص'
+        };
     }
 }
 
@@ -59,54 +99,33 @@ export function setupSongHandlers(bot: TelegramBot) {
         const chatId = msg.chat.id;
         if (!msg.audio) return;
 
-        let songData: any = null;
-        let identifiedBy = ''; // To track how we found the info
-
-        // --- NEW: HYBRID APPROACH ---
-        // STEP 1: Try to get info from the file's metadata first.
+        // --- CHANGED: Simplified logic ---
         const titleFromMeta = msg.audio.title;
         const artistFromMeta = msg.audio.performer;
 
         if (titleFromMeta && artistFromMeta) {
-            bot.sendMessage(chatId, "اطلاعات از متادیتای فایل خوانده شد. در حال دریافت حقیقت جالب...");
-            songData = {
-                title: titleFromMeta,
-                artists: [{ name: artistFromMeta }],
-                // Add placeholder data for album and release date as they aren't in metadata
-                album: { name: 'نامشخص' },
-                release_date: 'نامشخص'
-            };
-            identifiedBy = 'metadata';
-        } else {
-            // STEP 2: If metadata is missing, fall back to AI recognition (ACRCloud).
-            bot.sendMessage(chatId, "فایل متادیتا ندارد...");
-        }
-        // --- STEP 3: Process the result and send to user ---
-        if (songData) {
-            const title = songData.title;
-            const artists = songData.artists.map((a: any) => a.name).join(', ');
-            const album = songData.album.name;
-            const releaseDate = songData.release_date;
+            bot.sendMessage(chatId, `اطلاعات از متادیتای فایل خوانده شد: "${titleFromMeta}" از "${artistFromMeta}".\nدر حال تکمیل اطلاعات و دریافت حقیقت جالب...`);
 
-            // Get a fun fact from Liara AI
-            const funFact = await getSongInfoFromLiara(title, artists);
+            // --- CHANGED ---: Call the new function to get both fun fact and release date.
+            const aiDetails = await getSongDetailsFromLiara(titleFromMeta, artistFromMeta);
 
-            // Format and send the final message
             const finalMessage = `
-🎵 **آهنگ شناسایی شد!** ${identifiedBy === 'metadata' ? '(از روی فایل)' : '(توسط هوش مصنوعی)'}
+            🎵 **آهنگ شناسایی شد!** (از روی فایل)
 
-**عنوان:** ${title}
-**خواننده:** ${artists}
-**آلبوم:** ${album}
-**تاریخ انتشار:** ${releaseDate}
+            **عنوان:** ${titleFromMeta}
+            **خواننده:** ${artistFromMeta}
+            **تاریخ انتشار:** ${aiDetails.releaseDate}
 
-**یک حقیقت جالب:**
-${funFact}
+            **یک حقیقت جالب:**
+            ${aiDetails.funFact}
             `;
+
             bot.sendMessage(chatId, finalMessage, { parse_mode: 'Markdown' });
 
         } else {
-            bot.sendMessage(chatId, "متاسفانه نتوانستم این آهنگ را شناسایی کنم. لطفا یک فایل دیگر را امتحان کنید.");
+            // STEP 2: Fallback logic (like ACRCloud) would go here.
+            // For now, we just inform the user that metadata is missing.
+            bot.sendMessage(chatId, "متاسفانه فایل صوتی شما فاقد اطلاعات (متادیتا) در مورد نام آهنگ و خواننده است. در حال حاضر، شناسایی آهنگ بدون این اطلاعات امکان‌پذیر نیست.");
         }
     });
 }
